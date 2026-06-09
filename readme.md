@@ -45,10 +45,61 @@ git clone https://github.com/FatihMakes/Mark-XXXIX.git
 cd Mark-XXXIX
 pip install -r requirements.txt
 playwright install
+# Configure your API keys (see below) before running
 python main.py
 ```
 
 > ⚠️ **Installation Note:** To keep the repository lightweight, some OS-specific dependencies are not bundled in `requirements.txt`. If you run into a `ModuleNotFoundError`, simply install the missing package via `pip install <module_name>` for your specific system.
+
+---
+
+## 🔑 Configuration
+
+Your API keys and credentials are **not** included in the repo (they're gitignored). You must create them locally. Example templates are provided in the `config/` folder.
+
+### 1. API Keys (required)
+
+Copy the example file and fill in your own keys:
+
+```bash
+# Windows (PowerShell)
+Copy-Item config/api_keys.example.json config/api_keys.json
+
+# macOS / Linux
+cp config/api_keys.example.json config/api_keys.json
+```
+
+Then edit `config/api_keys.json`:
+
+```json
+{
+    "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE",
+    "os_system": "windows",
+    "fathom_api_key": "YOUR_FATHOM_API_KEY_HERE"
+}
+```
+
+| Key | Required? | Where to get it |
+|---|---|---|
+| `gemini_api_key` | ✅ Required | [Google AI Studio](https://aistudio.google.com/apikey) — free |
+| `os_system` | ✅ Required | `windows`, `macos`, or `linux` |
+| `fathom_api_key` | Optional | [Fathom](https://fathom.video) → Settings → API (only needed for meeting briefs) |
+
+### 2. Google OAuth — Gmail & Calendar (optional)
+
+Needed only for the **morning brief** (email + calendar). Skip if you don't use it.
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) → create a project.
+2. Enable the **Gmail API** and **Google Calendar API**.
+3. Under **APIs & Services → Credentials**, create an **OAuth client ID** (type: *Desktop app*).
+4. Download the JSON and save it as `config/google_credentials.json` (a template is at `config/google_credentials.example.json`).
+5. On first run, a browser window will open for you to authorize access. Tokens are saved automatically to `config/gmail_token.json` and `config/calendar_token.json`.
+
+### 3. Fathom Meetings (optional)
+
+If you set a `fathom_api_key`, JARVIS will fetch your meeting recordings, save transcripts to a local knowledge base, and generate AI-summarized to-do lists. No extra setup beyond the key.
+
+> 🔒 **Never commit** `api_keys.json`, `google_credentials.json`, or any `*_token.json` — they're already in `.gitignore` to keep your secrets safe.
 
 ---
 
