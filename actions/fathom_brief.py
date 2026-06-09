@@ -665,18 +665,20 @@ def fathom_brief(parameters: dict, player=None, session_memory=None, speak=None)
     _bg_default = "true" if speak else ""
     background = str(parameters.get("background", _bg_default)).lower() in ("true", "1", "yes")
 
-    # Get today's date range in UTC (unless recent mode)
-    now = datetime.now(timezone.utc)
     if recent_mode:
         created_after = None
         created_before = None
         print(f"[FathomBrief] Fetching {max_recordings} most recent recordings...")
     else:
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        created_after = start.isoformat().replace("+00:00", "Z")
-        created_before = end.isoformat().replace("+00:00", "Z")
-        print(f"[FathomBrief] Fetching today's recordings...")
+        # "Today" in the user's LOCAL timezone, converted to UTC for the API
+        # (the API filters on UTC created_at, so we must convert the local-day
+        #  boundaries — otherwise a morning meeting in UTC+8 looks like yesterday).
+        local_now = datetime.now().astimezone()
+        local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        local_end = local_now.replace(hour=23, minute=59, second=59, microsecond=0)
+        created_after = local_start.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        created_before = local_end.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        print(f"[FathomBrief] Fetching today's recordings ({local_now.strftime('%Y-%m-%d %Z')})...")
 
     recordings = _get_recordings(api_key, created_after, created_before)
     recordings = recordings[:max_recordings]
