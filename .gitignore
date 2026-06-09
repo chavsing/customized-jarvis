@@ -1,0 +1,37 @@
+# ===== Secrets & credentials (NEVER commit) =====
+config/api_keys.json
+config/google_credentials.json
+config/gmail_token.json
+config/calendar_token.json
+config/*token*.json
+config/*credentials*.json
+*.token
+
+# ===== Personal data =====
+memory/long_term.json
+knowledge_base/
+
+# ===== Logs =====
+*.log
+config/bring_to_front.log
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+ENV/
+
+# ===== IDE / OS =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
