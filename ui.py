@@ -254,6 +254,16 @@ class HudCanvas(QWidget):
         self.speaking = False
         self.state    = "INITIALISING"
 
+        # live audio amplitude (0..1) fed from the playback stream for true reactivity
+        self.audio_level    = 0.0
+        self._level_smooth  = 0.0
+        self._wave_hist     = [0.0] * 48
+
+        # cached layers (rebuilt only on resize) — keeps the dense look at 60fps
+        self._rune_px       = None
+        self._bg_px         = None
+        self._cache_dim     = (0, 0)
+
         self._tick       = 0
         self._scale      = 1.0
         self._tgt_scale  = 1.0
@@ -291,14 +301,80 @@ class HudCanvas(QWidget):
         except Exception:
             self._face_px = None
 
+    def _build_caches(self, W, H, fw):
+        """Render the expensive static layers (rune rings + chromatic background)
+        to off-screen pixmaps once, so each frame only blits/rotates them."""
+        cx, cy = W / 2, H / 2
+
+        # --- chromatic "portal" background ---
+        bgpx = QPixmap(W, H)
+        bgpx.fill(qcol(C.BG))
+        bp = QPainter(bgpx)
+        bp.setRenderHint(QPainter.RenderHint.Antialiasing)
+        bg = QRadialGradient(cx, cy, fw * 0.75)
+        bg.setColorAt(0.00, QColor(20, 12, 2, 255))
+        bg.setColorAt(0.45, QColor(30, 24, 6, 255))
+        bg.setColorAt(0.72, QColor(8, 34, 28, 90))
+        bg.setColorAt(0.88, QColor(40, 30, 6, 70))
+        bg.setColorAt(1.00, QColor(6, 5, 3, 0))
+        bp.setPen(Qt.PenStyle.NoPen)
+        bp.setBrush(QBrush(bg))
+        bp.drawRect(0, 0, W, H)
+        for fx, fy, rgb in [(0.16, 0.22, (0, 180, 140)), (0.84, 0.30, (40, 120, 200)),
+                            (0.22, 0.80, (255, 150, 40)), (0.80, 0.78, (0, 200, 120)),
+                            (0.50, 0.12, (255, 200, 60))]:
+            bx, by, br = fx * W, fy * H, fw * 0.11
+            g2 = QRadialGradient(bx, by, br)
+            g2.setColorAt(0.0, QColor(rgb[0], rgb[1], rgb[2], 34))
+            g2.setColorAt(1.0, QColor(rgb[0], rgb[1], rgb[2], 0))
+            bp.setBrush(QBrush(g2))
+            bp.drawEllipse(QRectF(bx - br, by - br, br * 2, br * 2))
+        bp.end()
+        self._bg_px = bgpx
+
+        # --- dense runic glyph rings (baked once, rotated as one image) ---
+        runes = "ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛏᛒᛖᛗᛚᛜᛞᛟᛤᛥᚪᚫᚬᚭᚮᚯᛁᛂᛅᛆᛒᛣᛤ"
+        rpx = QPixmap(W, H)
+        rpx.fill(Qt.GlobalColor.transparent)
+        rp = QPainter(rpx)
+        rp.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rp.setPen(QPen(qcol(C.PRI, 170), 1))
+        for rf, count, fsz in [(0.475, 104, 11), (0.415, 90, 12), (0.345, 72, 12)]:
+            rr = fw * rf
+            rp.setFont(QFont("Segoe UI Symbol", fsz, QFont.Weight.Bold))
+            for s in range(count):
+                deg = s * (360.0 / count)
+                a0  = math.radians(deg)
+                gx  = cx + rr * math.cos(a0)
+                gy  = cy - rr * math.sin(a0)
+                ch  = runes[(s * 5 + int(rf * 37)) % len(runes)]
+                rp.save()
+                rp.translate(gx, gy)
+                rp.rotate(-deg + 90)
+                rp.drawText(QRectF(-12, -12, 24, 24), Qt.AlignmentFlag.AlignCenter, ch)
+                rp.restore()
+        rp.end()
+        self._rune_px = rpx
+        self._cache_dim = (W, H)
+
     def _step(self):
         self._tick += 1
         now = time.time()
-        if now - self._last_t > (0.12 if self.speaking else 0.5):
-            if self.speaking:
-                self._tgt_scale = random.uniform(1.06, 1.14)
-                self._tgt_halo  = random.uniform(145, 190)
-            elif self.muted:
+
+        # smooth the incoming audio level and decay it between chunks
+        self._level_smooth += (self.audio_level - self._level_smooth) * 0.45
+        self.audio_level *= 0.80
+        # push into the scrolling waveform history
+        self._wave_hist.append(self._level_smooth)
+        self._wave_hist.pop(0)
+
+        if self.speaking:
+            # drive the core pulse + glow from the REAL voice amplitude
+            lvl = max(0.0, min(1.0, self._level_smooth))
+            self._tgt_scale = 1.0 + 0.20 * lvl
+            self._tgt_halo  = 50 + 170 * lvl
+        elif now - self._last_t > 0.5:
+            if self.muted:
                 self._tgt_scale = random.uniform(0.998, 1.002)
                 self._tgt_halo  = random.uniform(15, 28)
             else:
@@ -306,7 +382,7 @@ class HudCanvas(QWidget):
                 self._tgt_halo  = random.uniform(48, 68)
             self._last_t = now
 
-        sp = 0.38 if self.speaking else 0.15
+        sp = 0.45 if self.speaking else 0.15
         self._scale += (self._tgt_scale - self._scale) * sp
         self._halo  += (self._tgt_halo  - self._halo)  * sp
 
@@ -352,31 +428,15 @@ class HudCanvas(QWidget):
         cx, cy = W / 2, H / 2
         fw = min(W, H)
 
-        # chromatic "portal" background: dark warm center -> faint colored fringe
-        p.fillRect(self.rect(), qcol(C.BG))
-        if not self.muted:
-            bg = QRadialGradient(cx, cy, fw * 0.75)
-            bg.setColorAt(0.00, QColor(20, 12, 2, 255))
-            bg.setColorAt(0.45, QColor(30, 24, 6, 255))
-            bg.setColorAt(0.72, QColor(8, 34, 28, 90))    # teal fringe
-            bg.setColorAt(0.88, QColor(40, 30, 6, 70))    # amber fringe
-            bg.setColorAt(1.00, QColor(6, 5, 3, 0))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QBrush(bg))
-            p.drawRect(self.rect())
-            # soft colored bokeh blobs (deterministic positions, gentle drift)
-            blobs = [(0.16, 0.22, (0, 180, 140)), (0.84, 0.30, (40, 120, 200)),
-                     (0.22, 0.80, (255, 150, 40)), (0.80, 0.78, (0, 200, 120)),
-                     (0.50, 0.12, (255, 200, 60))]
-            for k, (fx, fy, rgb) in enumerate(blobs):
-                drift = math.sin(self._tick * 0.01 + k) * 8
-                bx, by = fx * W + drift, fy * H - drift
-                br = fw * 0.10
-                bg2 = QRadialGradient(bx, by, br)
-                bg2.setColorAt(0.0, QColor(rgb[0], rgb[1], rgb[2], 34))
-                bg2.setColorAt(1.0, QColor(rgb[0], rgb[1], rgb[2], 0))
-                p.setBrush(QBrush(bg2))
-                p.drawEllipse(QRectF(bx - br, by - br, br * 2, br * 2))
+        # (re)build cached layers on first paint / resize
+        if self._cache_dim != (W, H) or self._rune_px is None:
+            self._build_caches(W, H, fw)
+
+        # chromatic "portal" background (cached blit)
+        if self.muted:
+            p.fillRect(self.rect(), qcol(C.BG))
+        else:
+            p.drawPixmap(0, 0, self._bg_px)
 
         # grid dots
         p.setPen(QPen(qcol(C.PRI_GHO), 1))
@@ -417,25 +477,13 @@ class HudCanvas(QWidget):
                     QPointF(cx + rl   * ca, cy - rl   * sa_),
                 )
 
-        # runic glyph rings (rotating rings of golden runes, like the target)
-        runes = "ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛏᛒᛖᛗᛚᛜᛞᛟᛤᛥ"
-        for rf, count, rot_dir, fsz in [(0.46, 54, 1, 13), (0.385, 44, -1, 15)]:
-            rr   = fw * rf
-            rrot = self._tick * 0.06 * rot_dir
-            gcol = qcol(C.MUTED_C if self.muted else C.PRI, 175)
-            p.setFont(QFont("Segoe UI Symbol", fsz, QFont.Weight.Bold))
-            p.setPen(QPen(gcol, 1))
-            for s in range(count):
-                deg = rrot + s * (360.0 / count)
-                a0  = math.radians(deg)
-                gx  = cx + rr * math.cos(a0)
-                gy  = cy - rr * math.sin(a0)
-                ch  = runes[(s * 5 + int(rf * 31)) % len(runes)]
-                p.save()
-                p.translate(gx, gy)
-                p.rotate(-deg + 90)          # orient tangentially around the ring
-                p.drawText(QRectF(-14, -14, 28, 28), Qt.AlignmentFlag.AlignCenter, ch)
-                p.restore()
+        # runic glyph rings (cached image, rotated as one piece — fast)
+        if self._rune_px is not None and not self.muted:
+            p.save()
+            p.translate(cx, cy)
+            p.rotate(self._tick * 0.05)
+            p.drawPixmap(int(-W / 2), int(-H / 2), self._rune_px)
+            p.restore()
 
         # pulse rings
         for pr in self._pulses:
@@ -596,16 +644,20 @@ class HudCanvas(QWidget):
         p.setFont(QFont("Courier New", 11, QFont.Weight.Bold))
         p.drawText(QRectF(0, sy, W, 26), Qt.AlignmentFlag.AlignCenter, txt)
 
-        # waveform
+        # waveform — driven by the real audio amplitude history when speaking
         wy = sy + 30
         N, bw = 36, 8
         wx0 = (W - N * bw) / 2
+        hist = self._wave_hist
         for i in range(N):
             if self.muted:
                 hgt, cl = 2, qcol(C.MUTED_C)
             elif self.speaking:
-                hgt = random.randint(3, 20)
-                cl  = qcol(C.PRI) if hgt > 12 else qcol(C.PRI_DIM)
+                # sample the scrolling level history, with light per-bar variation
+                lvl = hist[int(i / N * (len(hist) - 1))]
+                jitter = 0.7 + 0.3 * abs(math.sin(self._tick * 0.3 + i))
+                hgt = max(2, int(3 + 26 * lvl * jitter))
+                cl  = qcol(C.ACC2) if hgt > 14 else qcol(C.PRI)
             else:
                 hgt = int(3 + 2 * math.sin(self._tick * 0.09 + i * 0.6))
                 cl  = qcol(C.BORDER_B)
@@ -1735,6 +1787,14 @@ class JarvisUI:
 
     def set_state(self, state: str):
         self._win._state_sig.emit(state)
+
+    def set_audio_level(self, level: float):
+        """Feed the live output-audio amplitude (0..1) to the HUD for true
+        voice-reactive pulsing. Safe to call from the audio thread."""
+        try:
+            self._win.hud.audio_level = max(0.0, min(1.0, float(level)))
+        except Exception:
+            pass
 
     def write_log(self, text: str):
         self._win._log_sig.emit(text)

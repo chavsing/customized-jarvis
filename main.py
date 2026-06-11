@@ -7,6 +7,7 @@ import traceback
 from pathlib import Path
 
 import sounddevice as sd
+import numpy as np
 from google import genai
 from google.genai import types
 from ui import JarvisUI
@@ -1172,12 +1173,21 @@ class JarvisLive:
                         self._turn_done_event.clear()
                     continue
                 self.set_speaking(True)
+                # Feed real audio amplitude to the HUD for voice-reactive pulsing
+                try:
+                    samples = np.frombuffer(chunk, dtype=np.int16)
+                    if samples.size:
+                        rms = float(np.sqrt(np.mean(samples.astype(np.float32) ** 2)))
+                        self.ui.set_audio_level(min(1.0, rms / 6000.0))
+                except Exception:
+                    pass
                 await asyncio.to_thread(stream.write, chunk)
         except Exception as e:
             print(f"[JARVIS] ❌ Play: {e}")
             raise
         finally:
             self.set_speaking(False)
+            self.ui.set_audio_level(0.0)
             stream.stop()
             stream.close()
 
