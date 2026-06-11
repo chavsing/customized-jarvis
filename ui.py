@@ -46,27 +46,28 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
 class C:
-    BG        = "#00060a"
-    PANEL     = "#010d14"
-    PANEL2    = "#010f18"
-    BORDER    = "#0d3347"
-    BORDER_B  = "#1a5c7a"
-    BORDER_A  = "#0f4060"
-    PRI       = "#00d4ff"
-    PRI_DIM   = "#007a99"
-    PRI_GHO   = "#001f2e"
-    ACC       = "#ff6b00"
-    ACC2      = "#ffcc00"
+    # Gold / amber Iron-Man theme
+    BG        = "#060503"
+    PANEL     = "#0c0a05"
+    PANEL2    = "#100c06"
+    BORDER    = "#3a2c10"
+    BORDER_B  = "#8a661c"
+    BORDER_A  = "#5c4414"
+    PRI       = "#ffb020"
+    PRI_DIM   = "#aa7515"
+    PRI_GHO   = "#2a1d08"
+    ACC       = "#ff7e00"
+    ACC2      = "#ffd24a"
     GREEN     = "#00ff88"
     GREEN_D   = "#00aa55"
     RED       = "#ff3355"
     MUTED_C   = "#ff3366"
-    TEXT      = "#8ffcff"
-    TEXT_DIM  = "#3a8a9a"
-    TEXT_MED  = "#5ab8cc"
-    WHITE     = "#d8f8ff"
-    DARK      = "#000d14"
-    BAR_BG    = "#011520"
+    TEXT      = "#ffd9a0"
+    TEXT_DIM  = "#8a6a3a"
+    TEXT_MED  = "#c89a55"
+    WHITE     = "#fff3df"
+    DARK      = "#0a0703"
+    BAR_BG    = "#1a1408"
 
 
 def qcol(h: str, a: int = 255) -> QColor:
@@ -346,11 +347,36 @@ class HudCanvas(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(), qcol(C.BG))
 
         W, H = self.width(), self.height()
         cx, cy = W / 2, H / 2
         fw = min(W, H)
+
+        # chromatic "portal" background: dark warm center -> faint colored fringe
+        p.fillRect(self.rect(), qcol(C.BG))
+        if not self.muted:
+            bg = QRadialGradient(cx, cy, fw * 0.75)
+            bg.setColorAt(0.00, QColor(20, 12, 2, 255))
+            bg.setColorAt(0.45, QColor(30, 24, 6, 255))
+            bg.setColorAt(0.72, QColor(8, 34, 28, 90))    # teal fringe
+            bg.setColorAt(0.88, QColor(40, 30, 6, 70))    # amber fringe
+            bg.setColorAt(1.00, QColor(6, 5, 3, 0))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(bg))
+            p.drawRect(self.rect())
+            # soft colored bokeh blobs (deterministic positions, gentle drift)
+            blobs = [(0.16, 0.22, (0, 180, 140)), (0.84, 0.30, (40, 120, 200)),
+                     (0.22, 0.80, (255, 150, 40)), (0.80, 0.78, (0, 200, 120)),
+                     (0.50, 0.12, (255, 200, 60))]
+            for k, (fx, fy, rgb) in enumerate(blobs):
+                drift = math.sin(self._tick * 0.01 + k) * 8
+                bx, by = fx * W + drift, fy * H - drift
+                br = fw * 0.10
+                bg2 = QRadialGradient(bx, by, br)
+                bg2.setColorAt(0.0, QColor(rgb[0], rgb[1], rgb[2], 34))
+                bg2.setColorAt(1.0, QColor(rgb[0], rgb[1], rgb[2], 0))
+                p.setBrush(QBrush(bg2))
+                p.drawEllipse(QRectF(bx - br, by - br, br * 2, br * 2))
 
         # grid dots
         p.setPen(QPen(qcol(C.PRI_GHO), 1))
@@ -368,6 +394,48 @@ class HudCanvas(QWidget):
             col = qcol(C.MUTED_C if self.muted else C.PRI, a)
             p.setPen(QPen(col, 1.5)); p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawEllipse(QRectF(cx - r, cy - r, r * 2, r * 2))
+
+        # radial light-ray starburst bursting from the core
+        if not self.muted:
+            n_rays = 96
+            r_in   = fw * 0.11
+            r_out  = fw * 0.47
+            rot    = self._tick * 0.10
+            base_a = max(35, min(230, int(self._halo * 1.15)))
+            for i in range(n_rays):
+                ang = math.radians(rot + i * (360.0 / n_rays))
+                ca, sa_ = math.cos(ang), math.sin(ang)
+                v  = abs(math.sin(i * 1.7 + self._tick * 0.04))
+                rl = r_out * (0.52 + 0.48 * v)
+                a  = int(base_a * (0.4 + 0.6 * v))
+                if v > 0.82:                       # bright white-gold long spokes
+                    p.setPen(QPen(qcol("#fff0cc", min(255, a + 50)), 1.5))
+                else:
+                    p.setPen(QPen(qcol(C.ACC2, a), 1.0))
+                p.drawLine(
+                    QPointF(cx + r_in * ca, cy - r_in * sa_),
+                    QPointF(cx + rl   * ca, cy - rl   * sa_),
+                )
+
+        # runic glyph rings (rotating rings of golden runes, like the target)
+        runes = "ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛏᛒᛖᛗᛚᛜᛞᛟᛤᛥ"
+        for rf, count, rot_dir, fsz in [(0.46, 54, 1, 13), (0.385, 44, -1, 15)]:
+            rr   = fw * rf
+            rrot = self._tick * 0.06 * rot_dir
+            gcol = qcol(C.MUTED_C if self.muted else C.PRI, 175)
+            p.setFont(QFont("Segoe UI Symbol", fsz, QFont.Weight.Bold))
+            p.setPen(QPen(gcol, 1))
+            for s in range(count):
+                deg = rrot + s * (360.0 / count)
+                a0  = math.radians(deg)
+                gx  = cx + rr * math.cos(a0)
+                gy  = cy - rr * math.sin(a0)
+                ch  = runes[(s * 5 + int(rf * 31)) % len(runes)]
+                p.save()
+                p.translate(gx, gy)
+                p.rotate(-deg + 90)          # orient tangentially around the ring
+                p.drawText(QRectF(-14, -14, 28, 28), Qt.AlignmentFlag.AlignCenter, ch)
+                p.restore()
 
         # pulse rings
         for pr in self._pulses:
@@ -441,18 +509,61 @@ class HudCanvas(QWidget):
             )
             p.drawPixmap(int(cx - fsz / 2), int(cy - fsz / 2), scaled)
         else:
-            orb_r = int(fw * 0.27 * self._scale)
-            oc    = (200, 0, 50) if self.muted else (0, 60, 110)
-            for i in range(8, 0, -1):
-                r2  = int(orb_r * i / 8)
-                frc = i / 8
-                a   = max(0, min(255, int(self._halo * 1.1 * frc)))
-                p.setBrush(QBrush(QColor(int(oc[0]*frc), int(oc[1]*frc), int(oc[2]*frc), a)))
-                p.setPen(Qt.PenStyle.NoPen)
-                p.drawEllipse(QRectF(cx - r2, cy - r2, r2 * 2, r2 * 2))
-            p.setPen(QPen(qcol(C.PRI, min(255, int(self._halo * 2))), 1))
+            sc = self._scale
+            p.setPen(Qt.PenStyle.NoPen)
+
+            # outer glowing bloom: white-hot center -> gold -> transparent
+            bloom_r = fw * 0.36 * sc
+            grad = QRadialGradient(cx, cy, bloom_r)
+            if self.muted:
+                grad.setColorAt(0.00, QColor(255, 225, 225, 255))
+                grad.setColorAt(0.18, QColor(255, 60, 90, 230))
+                grad.setColorAt(0.55, QColor(120, 10, 30, 110))
+                grad.setColorAt(1.00, QColor(40, 0, 10, 0))
+            else:
+                grad.setColorAt(0.00, QColor(255, 255, 245, 255))
+                grad.setColorAt(0.12, QColor(255, 240, 190, 255))
+                grad.setColorAt(0.32, QColor(255, 178, 48, 235))
+                grad.setColorAt(0.62, QColor(175, 92, 8, 135))
+                grad.setColorAt(1.00, QColor(60, 30, 0, 0))
+            p.setBrush(QBrush(grad))
+            p.drawEllipse(QRectF(cx - bloom_r, cy - bloom_r, bloom_r * 2, bloom_r * 2))
+
+            # bright inner hot-spot
+            hs_r = fw * 0.13 * sc
+            hg = QRadialGradient(cx, cy, hs_r)
+            if self.muted:
+                hg.setColorAt(0.0, QColor(255, 255, 255, 255))
+                hg.setColorAt(0.5, QColor(255, 180, 190, 200))
+                hg.setColorAt(1.0, QColor(255, 120, 120, 0))
+            else:
+                hg.setColorAt(0.0, QColor(255, 255, 255, 255))
+                hg.setColorAt(0.5, QColor(255, 246, 212, 210))
+                hg.setColorAt(1.0, QColor(255, 208, 120, 0))
+            p.setBrush(QBrush(hg))
+            p.drawEllipse(QRectF(cx - hs_r, cy - hs_r, hs_r * 2, hs_r * 2))
+
+            # jagged white "membrane" ring at the core boundary (crystalline edge)
+            if not self.muted:
+                mem_r = fw * 0.205 * sc
+                n_seg = 64
+                path  = QPainterPath()
+                for i in range(n_seg + 1):
+                    a   = 2 * math.pi * i / n_seg
+                    wob = 1.0 + 0.05 * math.sin(a * 9 + self._tick * 0.05) \
+                              + 0.028 * math.sin(a * 17 - self._tick * 0.03)
+                    rr  = mem_r * wob
+                    pt  = QPointF(cx + rr * math.cos(a), cy - rr * math.sin(a))
+                    path.moveTo(pt) if i == 0 else path.lineTo(pt)
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                for w, a in [(7, 50), (4, 110), (1.8, 230)]:
+                    p.setPen(QPen(qcol("#fff6e0", a), w))
+                    p.drawPath(path)
+
+            # core label — dark, for contrast against the bright core
+            p.setPen(QPen(QColor(70, 38, 0, 235), 1))
             p.setFont(QFont("Courier New", 13, QFont.Weight.Bold))
-            p.drawText(QRectF(cx - 80, cy - 14, 160, 28),
+            p.drawText(QRectF(cx - 90, cy - 14, 180, 28),
                        Qt.AlignmentFlag.AlignCenter, "J.A.R.V.I.S")
 
         # particles
