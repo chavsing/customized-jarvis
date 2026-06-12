@@ -1,25 +1,39 @@
 {
-  "_comment": "Copy this file to config/mcp_servers.json and edit. Each server is launched as a subprocess; JARVIS lists its tools and exposes them to Gemini. Set 'disabled': true to skip one. 'env' can hold API keys a server needs.",
+  "_comment": "Copy to config/mcp_servers.json and edit. JARVIS connects to each enabled server on startup, lists its tools, and exposes them to Gemini. Set 'disabled': true to skip one.",
 
-  "_windows_note": "On Windows, npx-based servers usually need to be wrapped with cmd: set command to 'cmd' and prefix args with '/c','npx'. Python servers (uvx / python) run directly.",
+  "_how_to_add": "Two kinds of servers: LOCAL (a program launched on your machine via 'command'+'args') and REMOTE (a hosted server via 'url'). Add as many as you like.",
+
+  "_windows_note": "Local npx servers need the cmd wrapper on Windows: command='cmd', args=['/c','npx',...]. Local binaries: point 'command' at the .exe. Remote servers need no install.",
 
   "mcpServers": {
-    "filesystem": {
+
+    "filesystem_LOCAL_npx_example": {
       "command": "cmd",
       "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\YOUR_NAME\\Desktop"],
       "disabled": true
     },
 
-    "fetch": {
-      "command": "uvx",
-      "args": ["mcp-server-fetch"],
+    "github_LOCAL_binary_example": {
+      "command": "C:\\Users\\YOUR_NAME\\Desktop\\Mark-XXXIX\\bin\\github-mcp-server.exe",
+      "args": ["stdio"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_TOKEN_HERE",
+        "GITHUB_READ_ONLY": "1",
+        "GITHUB_TOOLSETS": "repos,issues"
+      },
       "disabled": true
     },
 
-    "github": {
-      "command": "cmd",
-      "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_TOKEN_HERE" },
+    "notion_REMOTE_http_example": {
+      "url": "https://mcp.notion.com/mcp",
+      "headers": { "Authorization": "Bearer YOUR_NOTION_TOKEN" },
+      "disabled": true
+    },
+
+    "some_REMOTE_with_token_field": {
+      "url": "https://example.com/mcp",
+      "token": "YOUR_TOKEN",
+      "transport": "http",
       "disabled": true
     }
   }

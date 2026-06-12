@@ -103,6 +103,37 @@ class MCPManager:
             print(f"[MCP] Config error: {e}")
             return {}
 
+    async def _open_streams(self, sname: str, spec: dict):
+        """Open (read, write) streams for a server — local (stdio) OR remote (http/sse).
+        - Remote: spec has 'url' (+ optional 'headers' / 'token' / 'transport': 'sse')
+        - Local:  spec has 'command' (+ 'args' / 'env')
+        """
+        if spec.get("url"):
+            url = spec["url"]
+            headers = dict(spec.get("headers", {}))
+            tok = spec.get("token")
+            if tok and "Authorization" not in headers:
+                headers["Authorization"] = f"Bearer {tok}"
+            if (spec.get("transport") or "http").lower() == "sse":
+                from mcp.client.sse import sse_client
+                streams = await self._stack.enter_async_context(
+                    sse_client(url, headers=headers))
+            else:
+                from mcp.client.streamable_http import streamablehttp_client
+                streams = await self._stack.enter_async_context(
+                    streamablehttp_client(url, headers=headers))
+        else:
+            from mcp import StdioServerParameters
+            from mcp.client.stdio import stdio_client
+            params = StdioServerParameters(
+                command=spec["command"],
+                args=spec.get("args", []),
+                env={**os.environ, **spec.get("env", {})},
+            )
+            streams = await self._stack.enter_async_context(stdio_client(params))
+        # stdio yields (read, write); http/sse yield (read, write, ...) — take first two
+        return streams[0], streams[1]
+
     async def connect_all(self):
         """Connect to all configured MCP servers and build tool declarations.
         Safe to call once at startup; never raises."""
@@ -112,8 +143,7 @@ class MCPManager:
             return
 
         try:
-            from mcp import ClientSession, StdioServerParameters
-            from mcp.client.stdio import stdio_client
+            from mcp import ClientSession
         except Exception:
             print("[MCP] 'mcp' package not installed — run: pip install mcp. Skipping.")
             return
@@ -123,12 +153,7 @@ class MCPManager:
             if spec.get("disabled"):
                 continue
             try:
-                params = StdioServerParameters(
-                    command=spec["command"],
-                    args=spec.get("args", []),
-                    env={**os.environ, **spec.get("env", {})},
-                )
-                read, write = await self._stack.enter_async_context(stdio_client(params))
+                read, write = await self._open_streams(sname, spec)
                 session = await self._stack.enter_async_context(ClientSession(read, write))
                 await session.initialize()
                 tools = (await session.list_tools()).tools
