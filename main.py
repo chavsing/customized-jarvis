@@ -11,6 +11,7 @@ import numpy as np
 from google import genai
 from google.genai import types
 from ui import JarvisUI
+import skills_manager
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
 )
@@ -487,6 +488,25 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "load_skill",
+        "description": (
+            "Loads the full step-by-step instructions for a named skill (a reusable "
+            "playbook). Call this when the user's request matches one of the AVAILABLE "
+            "SKILLS listed in your instructions. After loading, follow the returned "
+            "instructions, using your other tools as the steps direct."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "name": {
+                    "type": "STRING",
+                    "description": "The skill name to load (e.g. 'email-triage')."
+                }
+            },
+            "required": ["name"]
+        }
+    },
+    {
         "name": "spotify_music",
         "description": (
             "Controls Spotify music playback. "
@@ -830,6 +850,9 @@ class JarvisLive:
         if mem_str:
             parts.append(mem_str)
         parts.append(sys_prompt)
+        skills_block = skills_manager.skills_prompt_block()
+        if skills_block:
+            parts.append(skills_block)
 
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
@@ -866,6 +889,21 @@ class JarvisLive:
             return types.FunctionResponse(
                 id=fc.id, name=name,
                 response={"result": "ok", "silent": True}
+            )
+
+        if name == "load_skill":
+            skill_name = args.get("name", "")
+            body = skills_manager.load_skill(skill_name)
+            if body:
+                print(f"[Skill] 📜 Loaded skill: {skill_name}")
+                result = (
+                    f"SKILL INSTRUCTIONS for '{skill_name}' — follow these now:\n\n{body}"
+                )
+            else:
+                avail = ", ".join(s["name"] for s in skills_manager.list_skills())
+                result = f"No skill named '{skill_name}'. Available skills: {avail or 'none'}."
+            return types.FunctionResponse(
+                id=fc.id, name=name, response={"result": result}
             )
 
         loop   = asyncio.get_event_loop()
