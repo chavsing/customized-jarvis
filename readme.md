@@ -103,6 +103,52 @@ If you set a `fathom_api_key`, JARVIS will fetch your meeting recordings, save t
 
 ---
 
+## 🔌 MCP Servers (optional)
+
+JARVIS can connect to [MCP](https://modelcontextprotocol.io) servers to gain new tools — GitHub, Notion, Slack, filesystem, databases, and more — by config alone, no coding. Each server you add exposes its tools to JARVIS automatically.
+
+**1. Install the MCP client** (already included if you ran `pip install -r requirements.txt`):
+```bash
+pip install mcp
+```
+
+**2. Create your config** from the template:
+```bash
+# Windows (PowerShell)
+Copy-Item config/mcp_servers.example.json config/mcp_servers.json
+# macOS / Linux
+cp config/mcp_servers.example.json config/mcp_servers.json
+```
+
+**3. Add a server + its token** in `config/mcp_servers.json`. Three kinds are supported:
+
+- **Remote / hosted** (easiest — no install, just URL + token):
+  ```json
+  {
+    "mcpServers": {
+      "github": {
+        "url": "https://api.githubcopilot.com/mcp/readonly",
+        "token": "YOUR_GITHUB_TOKEN",
+        "transport": "http",
+        "disabled": false
+      }
+    }
+  }
+  ```
+- **Local via npx** (auto-downloads; on Windows wrap with `cmd /c`):
+  ```json
+  { "command": "cmd", "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-filesystem", "C:\\path"] }
+  ```
+- **Local binary** (e.g. GitHub's official server): `{ "command": "C:\\path\\to\\server.exe", "args": ["stdio"], "env": { "TOKEN": "..." } }`
+
+**4. Run JARVIS** — it connects to each enabled server on startup (look for `[MCP] ✅ ... connected`) and you can use those tools by voice.
+
+> 🔒 `config/mcp_servers.json` is **gitignored** (it can hold API keys in `env`/`token`), so your servers and tokens stay private. If you don't configure any servers, MCP stays dormant and JARVIS runs normally.
+
+> 💡 **Tip:** Many servers expose *dozens* of tools. Prefer read-only / scoped endpoints (e.g. GitHub's `/readonly`) to keep the total tool count manageable for the model.
+
+---
+
 ## 📋 Requirements
 
 | Requirement | Details |
