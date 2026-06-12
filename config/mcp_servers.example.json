@@ -1,0 +1,26 @@
+{
+  "_comment": "Copy this file to config/mcp_servers.json and edit. Each server is launched as a subprocess; JARVIS lists its tools and exposes them to Gemini. Set 'disabled': true to skip one. 'env' can hold API keys a server needs.",
+
+  "_windows_note": "On Windows, npx-based servers usually need to be wrapped with cmd: set command to 'cmd' and prefix args with '/c','npx'. Python servers (uvx / python) run directly.",
+
+  "mcpServers": {
+    "filesystem": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\YOUR_NAME\\Desktop"],
+      "disabled": true
+    },
+
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "disabled": true
+    },
+
+    "github": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_TOKEN_HERE" },
+      "disabled": true
+    }
+  }
+}

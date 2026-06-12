@@ -5,6 +5,7 @@ config/gmail_token.json
 config/calendar_token.json
 config/*token*.json
 config/*credentials*.json
+config/mcp_servers.json
 *.token
 
 # ===== Personal data =====

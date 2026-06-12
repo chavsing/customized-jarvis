@@ -12,6 +12,7 @@ from google import genai
 from google.genai import types
 from ui import JarvisUI
 import skills_manager
+from mcp_client import MCPManager
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
 )
@@ -738,6 +739,7 @@ class JarvisLive:
         )
         self._pending_morning_brief = False  # survives reconnect
         self._last_brief_time = 0.0  # timestamp of last brief (for cooldown)
+        self.mcp = MCPManager()  # external MCP servers (connected once at startup)
 
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
@@ -854,12 +856,15 @@ class JarvisLive:
         if skills_block:
             parts.append(skills_block)
 
+        # Built-in tools + any tools discovered from connected MCP servers
+        all_declarations = TOOL_DECLARATIONS + self.mcp.declarations
+
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             output_audio_transcription={},
             input_audio_transcription={},
             system_instruction="\n".join(parts),
-            tools=[{"function_declarations": TOOL_DECLARATIONS}],
+            tools=[{"function_declarations": all_declarations}],
             session_resumption=types.SessionResumptionConfig(),
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
@@ -876,6 +881,18 @@ class JarvisLive:
 
         print(f"[JARVIS] 🔧 {name}  {args}")
         self.ui.set_state("THINKING")
+
+        # Route to an external MCP server tool if this name belongs to one
+        if self.mcp.has_tool(name):
+            try:
+                r = await self.mcp.call(name, args)
+            except Exception as e:
+                r = f"MCP error: {str(e)[:200]}"
+            if not self.ui.muted:
+                self.ui.set_state("LISTENING")
+            return types.FunctionResponse(
+                id=fc.id, name=name, response={"result": r or "Done."}
+            )
 
         if name == "save_memory":
             category = args.get("category", "notes")
@@ -1234,6 +1251,12 @@ class JarvisLive:
             api_key=_get_api_key(),
             http_options={"api_version": "v1beta"}
         )
+
+        # Connect external MCP servers once (persists across reconnects).
+        try:
+            await self.mcp.connect_all()
+        except Exception as e:
+            print(f"[MCP] connect_all failed: {e}")
 
         while True:
             try:
