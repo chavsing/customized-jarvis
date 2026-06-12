@@ -17,6 +17,7 @@ Progressive disclosure (same idea as Claude Code):
 Drop a new .md file into skills/ and JARVIS gains that capability — no code.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -94,6 +95,32 @@ def load_skill(name: str) -> str | None:
             return body
 
     return None
+
+
+def _slugify(name: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", (name or "skill").strip().lower()).strip("-")
+    return s or "skill"
+
+
+def create_skill(name: str, description: str, body: str) -> str:
+    """Create or update a skill markdown file in skills/. Returns the filename.
+    Used both manually (via the create_skill tool) and by the self-improvement loop."""
+    slug = _slugify(name)
+    filepath = _skills_dir() / f"{slug}.md"
+    content = (
+        f"---\n"
+        f"name: {slug}\n"
+        f"description: {description.strip()}\n"
+        f"---\n\n"
+        f"{body.strip()}\n"
+    )
+    filepath.write_text(content, encoding="utf-8")
+    print(f"[Skills] Saved skill: {filepath.name}")
+    return filepath.name
+
+
+def skill_exists(name: str) -> bool:
+    return (_skills_dir() / f"{_slugify(name)}.md").exists()
 
 
 def skills_prompt_block() -> str:

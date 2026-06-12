@@ -12,6 +12,7 @@ from google import genai
 from google.genai import types
 from ui import JarvisUI
 import skills_manager
+import self_improve
 from mcp_client import MCPManager
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
@@ -508,6 +509,33 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "create_skill",
+        "description": (
+            "Saves a NEW reusable skill (a playbook) as a markdown file so you can reuse "
+            "it later. Call this when the user explicitly asks you to remember how to do "
+            "something as a skill, OR when you've just worked out a repeatable, multi-step "
+            "procedure worth keeping. Write clear step-by-step instructions in the body."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "name": {
+                    "type": "STRING",
+                    "description": "Short kebab-case skill name (e.g. 'invoice-followup')."
+                },
+                "description": {
+                    "type": "STRING",
+                    "description": "One line: when this skill should be used (the trigger condition)."
+                },
+                "body": {
+                    "type": "STRING",
+                    "description": "The full instructions in markdown — numbered steps, which tools to use, tips."
+                }
+            },
+            "required": ["name", "description", "body"]
+        }
+    },
+    {
         "name": "spotify_music",
         "description": (
             "Controls Spotify music playback. "
@@ -741,6 +769,56 @@ class JarvisLive:
         self._last_brief_time = 0.0  # timestamp of last brief (for cooldown)
         self.mcp = MCPManager()  # external MCP servers (connected once at startup)
 
+        # Self-improvement loop (Hermes-style counter-triggered review)
+        self._conv_history: list[str] = []   # rolling recent transcript
+        self._turns_since_memory = 0
+        self._iters_since_skill  = 0
+        self._review_running     = False
+        self._MEMORY_EVERY = 8   # user turns between memory reviews
+        self._SKILL_EVERY  = 10  # tool iterations between skill reviews
+
+    # ---- Self-improvement loop ----------------------------------------
+
+    def _record(self, entry: str):
+        """Append a line to the rolling conversation history (for reviews)."""
+        if not entry:
+            return
+        self._conv_history.append(entry)
+        if len(self._conv_history) > 60:
+            self._conv_history = self._conv_history[-60:]
+
+    def _spawn_review(self, kind: str):
+        """Fire a background memory/skill review (non-blocking, one at a time)."""
+        if self._review_running or not self._loop or not self._conv_history:
+            return
+        self._review_running = True
+        transcript = "\n".join(self._conv_history[-40:])
+        self._loop.run_in_executor(None, self._do_review, kind, transcript)
+
+    def _do_review(self, kind: str, transcript: str):
+        """Runs in a worker thread: review recent conversation, apply results."""
+        try:
+            if kind == "memory":
+                known = format_memory_for_prompt(load_memory())
+                mems = self_improve.review_memory(transcript, known)
+                for m in mems:
+                    update_memory({m["category"]: {m["key"]: {"value": m["value"]}}})
+                    self.ui.write_log(f"SYS: Remembered — {m['key']}: {m['value']}")
+                if mems:
+                    print(f"[SelfImprove] saved {len(mems)} memory item(s)")
+            else:  # skill
+                existing = [s["name"] for s in skills_manager.list_skills()]
+                skill = self_improve.review_skill(transcript, existing)
+                if skill and not skills_manager.skill_exists(skill["name"]):
+                    fn = skills_manager.create_skill(
+                        skill["name"], skill["description"], skill["body"])
+                    self.ui.write_log(f"SYS: Learned new skill — {fn}")
+                    print(f"[SelfImprove] created skill {fn}")
+        except Exception as e:
+            print(f"[SelfImprove] error: {e}")
+        finally:
+            self._review_running = False
+
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
             return
@@ -882,6 +960,13 @@ class JarvisLive:
         print(f"[JARVIS] 🔧 {name}  {args}")
         self.ui.set_state("THINKING")
 
+        # Self-improvement: track tool usage; periodically review for new skills
+        self._record(f"[tool] {name} {json.dumps(args)[:200]}")
+        self._iters_since_skill += 1
+        if self._iters_since_skill >= self._SKILL_EVERY:
+            self._iters_since_skill = 0
+            self._spawn_review("skill")
+
         # Route to an external MCP server tool if this name belongs to one
         if self.mcp.has_tool(name):
             try:
@@ -919,6 +1004,23 @@ class JarvisLive:
             else:
                 avail = ", ".join(s["name"] for s in skills_manager.list_skills())
                 result = f"No skill named '{skill_name}'. Available skills: {avail or 'none'}."
+            return types.FunctionResponse(
+                id=fc.id, name=name, response={"result": result}
+            )
+
+        if name == "create_skill":
+            try:
+                fn = skills_manager.create_skill(
+                    args.get("name", "skill"),
+                    args.get("description", ""),
+                    args.get("body", ""),
+                )
+                self.ui.write_log(f"SYS: Learned new skill — {fn}")
+                result = f"Skill saved as {fn}. I'll use it next time it's relevant."
+            except Exception as e:
+                result = f"Couldn't save skill: {str(e)[:120]}"
+            if not self.ui.muted:
+                self.ui.set_state("LISTENING")
             return types.FunctionResponse(
                 id=fc.id, name=name, response={"result": result}
             )
@@ -1178,12 +1280,20 @@ class JarvisLive:
                             full_in = " ".join(in_buf).strip()
                             if full_in:
                                 self.ui.write_log(f"You: {full_in}")
+                                self._record(f"You: {full_in}")
+                                self._turns_since_memory += 1
                             in_buf = []
 
                             full_out = " ".join(out_buf).strip()
                             if full_out:
                                 self.ui.write_log(f"Jarvis: {full_out}")
+                                self._record(f"Jarvis: {full_out}")
                             out_buf = []
+
+                            # Self-improvement: periodically review for new memories
+                            if self._turns_since_memory >= self._MEMORY_EVERY:
+                                self._turns_since_memory = 0
+                                self._spawn_review("memory")
 
                     if response.tool_call:
                         fn_responses = []
