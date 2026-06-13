@@ -63,9 +63,12 @@ def _convert_schema(s: dict) -> dict:
     out = {"type": _TYPE_MAP.get(str(t).lower(), "STRING")}
 
     if s.get("description"):
-        out["description"] = s["description"]
+        out["description"] = str(s["description"])
     if s.get("enum"):
-        out["enum"] = s["enum"]
+        # Gemini requires enum values to be STRINGS; some MCP schemas use
+        # booleans/numbers. Coerce them and force the type to STRING.
+        out["enum"] = [str(e) for e in s["enum"]]
+        out["type"] = "STRING"
 
     if out["type"] == "OBJECT":
         props = s.get("properties") or {}

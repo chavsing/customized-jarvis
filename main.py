@@ -937,21 +937,34 @@ class JarvisLive:
         # Built-in tools + any tools discovered from connected MCP servers
         all_declarations = TOOL_DECLARATIONS + self.mcp.declarations
 
-        return types.LiveConnectConfig(
-            response_modalities=["AUDIO"],
-            output_audio_transcription={},
-            input_audio_transcription={},
-            system_instruction="\n".join(parts),
-            tools=[{"function_declarations": all_declarations}],
-            session_resumption=types.SessionResumptionConfig(),
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name="Charon"
+        def _make(decls):
+            return types.LiveConnectConfig(
+                response_modalities=["AUDIO"],
+                output_audio_transcription={},
+                input_audio_transcription={},
+                system_instruction="\n".join(parts),
+                tools=[{"function_declarations": decls}],
+                session_resumption=types.SessionResumptionConfig(),
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name="Charon"
+                        )
                     )
-                )
-            ),
-        )
+                ),
+            )
+
+        # If an MCP tool's schema is invalid, don't let it brick the session —
+        # fall back to built-in tools only.
+        try:
+            return _make(all_declarations)
+        except Exception as e:
+            if self.mcp.declarations:
+                print(f"[JARVIS] ⚠️  MCP tool schema rejected ({str(e)[:120]}); "
+                      f"connecting with built-in tools only.")
+                self.ui.write_log("SYS: An MCP server's tools were invalid — skipped them.")
+                return _make(TOOL_DECLARATIONS)
+            raise
 
     async def _execute_tool(self, fc) -> types.FunctionResponse:
         name = fc.name
