@@ -6,6 +6,7 @@ config/calendar_token.json
 config/*token*.json
 config/*credentials*.json
 config/mcp_servers.json
+config/mcp_oauth_*.json
 *.token
 
 # ===== Personal data =====
