@@ -99,6 +99,21 @@ Needed only for the **morning brief** (email + calendar). Skip if you don't use 
 
 If you set a `fathom_api_key`, JARVIS will fetch your meeting recordings, save transcripts to a local knowledge base, and generate AI-summarized to-do lists. No extra setup beyond the key.
 
+### 4. Higgsfield image/video generation (optional)
+
+JARVIS can generate **and edit** images/videos with [Higgsfield](https://higgsfield.ai) via its official CLI (uses your normal Higgsfield account — no API key):
+
+```bash
+npm install -g @higgsfield/cli
+higgsfield auth login        # one-time browser sign-in (~5s)
+```
+
+Then by voice:
+- *"Generate an image of a quiet beach at sunrise"*
+- Drop an image onto JARVIS, then *"edit this to make it nighttime"* (uses the dropped image)
+
+Generation runs in the background (JARVIS stays responsive) and results are saved to `generated/`.
+
 > 🔒 **Never commit** `api_keys.json`, `google_credentials.json`, or any `*_token.json` — they're already in `.gitignore` to keep your secrets safe.
 
 ---
@@ -140,12 +155,21 @@ cp config/mcp_servers.example.json config/mcp_servers.json
   { "command": "cmd", "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-filesystem", "C:\\path"] }
   ```
 - **Local binary** (e.g. GitHub's official server): `{ "command": "C:\\path\\to\\server.exe", "args": ["stdio"], "env": { "TOKEN": "..." } }`
+- **OAuth ("log in once")** for hosted servers that use browser sign-in (e.g. Notion): add `"auth": "oauth"` and JARVIS opens a browser the first time; the login is saved (in gitignored `config/mcp_oauth_*.json`) so you only do it once.
+  ```json
+  { "url": "https://mcp.notion.com/mcp", "auth": "oauth", "transport": "http", "disabled": false }
+  ```
 
 **4. Run JARVIS** — it connects to each enabled server on startup (look for `[MCP] ✅ ... connected`) and you can use those tools by voice.
 
 > 🔒 `config/mcp_servers.json` is **gitignored** (it can hold API keys in `env`/`token`), so your servers and tokens stay private. If you don't configure any servers, MCP stays dormant and JARVIS runs normally.
 
-> 💡 **Tip:** Many servers expose *dozens* of tools. Prefer read-only / scoped endpoints (e.g. GitHub's `/readonly`) to keep the total tool count manageable for the model.
+> 💡 **Tip — keep the tool count low.** Many servers expose *dozens* of tools, which dulls the model's tool selection. Scope each server with an `"include"` (keep only these) or `"exclude"` (drop these) list of tool names, and/or use read-only/scoped endpoints:
+> ```json
+> { "url": "https://api.githubcopilot.com/mcp/", "token": "...", "include": ["get_me", "search_repositories", "create_repository"] }
+> ```
+
+> ⚠️ Some hosted servers (e.g. Higgsfield) restrict their MCP to pre-registered managed clients and won't work with a custom client — use their CLI instead (see Higgsfield above).
 
 ---
 

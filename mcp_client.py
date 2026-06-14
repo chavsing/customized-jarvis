@@ -344,7 +344,18 @@ class MCPManager:
             session = await local.enter_async_context(ClientSession(read, write))
             await session.initialize()
             tools = (await session.list_tools()).tools
+
+            # Optional per-server tool filter (keeps the total tool count sane):
+            #   "include": [...]  -> only register these tool names
+            #   "exclude": [...]  -> register all except these
+            include = set(spec.get("include") or [])
+            exclude = set(spec.get("exclude") or [])
+            registered = 0
             for t in tools:
+                if include and t.name not in include:
+                    continue
+                if t.name in exclude:
+                    continue
                 gname = _sanitize_name(f"mcp_{sname}_{t.name}")
                 while gname in self._tool_map:
                     gname = gname[:57] + "_x"
@@ -356,7 +367,9 @@ class MCPManager:
                     ),
                 })
                 self._tool_map[gname] = (session, t.name)
-            print(f"[MCP] ✅ '{sname}' connected — {len(tools)} tool(s).")
+                registered += 1
+            extra = f" (filtered from {len(tools)})" if registered != len(tools) else ""
+            print(f"[MCP] ✅ '{sname}' connected — {registered} tool(s){extra}.")
             # Success — keep this server's contexts alive until app shutdown.
             self._stack.push_async_callback(local.aclose)
         except BaseException:

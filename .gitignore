@@ -12,6 +12,7 @@ config/mcp_oauth_*.json
 # ===== Personal data =====
 memory/long_term.json
 knowledge_base/
+generated/
 
 # ===== Logs =====
 *.log

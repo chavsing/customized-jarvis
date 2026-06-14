@@ -14,6 +14,7 @@ from ui import JarvisUI
 import skills_manager
 import self_improve
 from mcp_client import MCPManager
+from actions.higgsfield_gen import higgsfield_generate, higgsfield_models
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
 )
@@ -507,6 +508,29 @@ TOOL_DECLARATIONS = [
             },
             "required": ["name"]
         }
+    },
+    {
+        "name": "higgsfield_generate",
+        "description": (
+            "Generates OR edits an AI image/video with Higgsfield and saves the result. "
+            "Use when the user asks to create/generate an image or video, OR to EDIT an "
+            "image they dropped onto JARVIS (e.g. 'edit this to add sunglasses'). "
+            "For editing, the dropped image is used automatically."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "prompt": {"type": "STRING", "description": "What to generate, or how to edit the input image."},
+                "model": {"type": "STRING", "description": "Optional Higgsfield model (default nano_banana_2)."},
+                "image": {"type": "STRING", "description": "Optional input image path(s) to edit, comma-separated. Usually leave blank — the image the user dropped is used automatically."}
+            },
+            "required": ["prompt"]
+        }
+    },
+    {
+        "name": "higgsfield_models",
+        "description": "Lists available Higgsfield image/video models.",
+        "parameters": {"type": "OBJECT", "properties": {}, "required": []}
     },
     {
         "name": "create_skill",
@@ -1169,6 +1193,30 @@ class JarvisLive:
                     lambda: fathom_brief(parameters=args, player=self.ui, speak=self.speak),
                 )
                 result = r or "No Fathom recordings today."
+
+            elif name == "higgsfield_generate":
+                # If the user dropped an image and didn't specify one, use it (editing).
+                if not args.get("image"):
+                    try:
+                        dropped = self.ui.current_file
+                        if dropped and dropped.lower().endswith(
+                            (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")
+                        ):
+                            args["image"] = dropped
+                    except Exception:
+                        pass
+                r = await loop.run_in_executor(
+                    None,
+                    lambda: higgsfield_generate(parameters=args, player=self.ui, speak=self.speak),
+                )
+                result = r or "Generation started."
+
+            elif name == "higgsfield_models":
+                r = await loop.run_in_executor(
+                    None,
+                    lambda: higgsfield_models(parameters=args, player=self.ui),
+                )
+                result = r or "No models found."
 
             elif name == "fathom_search":
                 r = await loop.run_in_executor(
