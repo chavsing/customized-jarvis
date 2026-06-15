@@ -44,6 +44,19 @@ _RIGHT_W = 360
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
+# GPU orb engine (moderngl). Optional — if not installed, fall back to the
+# QPainter HudCanvas so JARVIS still runs.
+try:
+    from orb_hud import OrbHud
+    from orb.window import make_surface_format
+    _ORB_AVAILABLE = True
+except Exception as _orb_err:
+    OrbHud = None
+    make_surface_format = None
+    _ORB_AVAILABLE = False
+    print(f"[UI] GPU orb unavailable ({_orb_err}); using fallback HUD. "
+          f"Install with: pip install moderngl")
+
 
 # UI font for panels/log/header/footer (NOT the orb runes). Consolas is a
 # clean, readable monospace that ships with Windows and reads larger than
@@ -289,6 +302,17 @@ class HudCanvas(QWidget):
         self._tmr = QTimer(self)
         self._tmr.timeout.connect(self._step)
         self._tmr.start(16)
+
+    # Uniform control API (shared with the GPU OrbHud widget).
+    def set_orb_state(self, state: str):
+        self.state = state
+        self.speaking = (state == "SPEAKING")
+
+    def set_muted(self, muted: bool):
+        self.muted = bool(muted)
+
+    def set_level(self, level: float):
+        self.audio_level = max(0.0, min(1.0, float(level)))
 
     def _load_face(self, path: str):
         try:
@@ -1193,7 +1217,14 @@ class MainWindow(QMainWindow):
         self._left_panel = self._build_left_panel()
         body.addWidget(self._left_panel, stretch=0)
 
-        self.hud = HudCanvas(face_path)
+        if _ORB_AVAILABLE:
+            try:
+                self.hud = OrbHud(face_path)
+            except Exception as e:
+                print(f"[UI] OrbHud init failed ({e}); using fallback HUD.")
+                self.hud = HudCanvas(face_path)
+        else:
+            self.hud = HudCanvas(face_path)
         self.hud.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         body.addWidget(self.hud, stretch=5)
 
@@ -1679,7 +1710,7 @@ class MainWindow(QMainWindow):
 
     def _toggle_mute(self):
         self._muted = not self._muted
-        self.hud.muted = self._muted
+        self.hud.set_muted(self._muted)
         self._style_mute_btn()
         if self._muted:
             self._apply_state("MUTED")
@@ -1716,8 +1747,7 @@ class MainWindow(QMainWindow):
             threading.Thread(target=self.on_text_command, args=(txt,), daemon=True).start()
 
     def _apply_state(self, state: str):
-        self.hud.state    = state
-        self.hud.speaking = (state == "SPEAKING")
+        self.hud.set_orb_state(state)
 
     def _check_config(self) -> bool:
         if not API_FILE.exists(): return False
@@ -1764,6 +1794,17 @@ class _RootShim:
 
 class JarvisUI:
     def __init__(self, face_path: str, size=None):
+        # The GPU orb needs an OpenGL 3.3 core surface with alpha — must be set
+        # as the default format BEFORE the QApplication / any GL widget exists.
+        if _ORB_AVAILABLE and QApplication.instance() is None:
+            try:
+                from PyQt6.QtGui import QSurfaceFormat
+                QApplication.setHighDpiScaleFactorRoundingPolicy(
+                    Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+                )
+                QSurfaceFormat.setDefaultFormat(make_surface_format())
+            except Exception as e:
+                print(f"[UI] surface format setup failed: {e}")
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setStyle("Fusion")
         self._win = MainWindow(face_path)
@@ -1798,7 +1839,7 @@ class JarvisUI:
         """Feed the live output-audio amplitude (0..1) to the HUD for true
         voice-reactive pulsing. Safe to call from the audio thread."""
         try:
-            self._win.hud.audio_level = max(0.0, min(1.0, float(level)))
+            self._win.hud.set_level(level)
         except Exception:
             pass
 

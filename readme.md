@@ -183,6 +183,11 @@ cp config/mcp_servers.example.json config/mcp_servers.json
 | **Python** | 3.11 or 3.12 |
 | **Microphone** | Required for voice interaction |
 | **API Key** | Free Gemini API key |
+| **GPU / OpenGL 3.3** | For the animated orb (via `moderngl`). Optional — without it, JARVIS auto-falls back to a simpler HUD |
+
+> 🟠 **The center orb** is a GPU-rendered (moderngl + GLSL) voice-reactive energy core in the `orb/` package — glyph rings, molten core, light rays, and bloom that pulse with JARVIS's voice. It needs `moderngl` (in `requirements.txt`) and an OpenGL 3.3 capable GPU. If `moderngl` isn't installed or GL fails, JARVIS automatically uses a lightweight QPainter HUD instead, so it always runs.
+>
+> 📦 **moderngl install note:** on **Python 3.11–3.13** `pip install` grabs a prebuilt wheel (nothing extra needed). On **Python 3.14+** there's no wheel yet, so pip compiles from source — which on Windows needs the [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) ("Desktop development with C++"). Easiest fix: use Python 3.11–3.13, or skip moderngl and use the fallback HUD.
 
 ---
 
