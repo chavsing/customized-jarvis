@@ -31,8 +31,13 @@ import json
 import os
 import re
 import sys
+import urllib.request
 from contextlib import AsyncExitStack
+from datetime import datetime
 from pathlib import Path
+
+_MEDIA_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
+              ".mp4", ".mov", ".webm", ".mp3", ".wav", ".m4a")
 
 
 def _base_dir() -> Path:
@@ -366,7 +371,7 @@ class MCPManager:
                         t.inputSchema or {"type": "object", "properties": {}}
                     ),
                 })
-                self._tool_map[gname] = (session, t.name)
+                self._tool_map[gname] = (session, t.name, sname)
                 registered += 1
             extra = f" (filtered from {len(tools)})" if registered != len(tools) else ""
             print(f"[MCP] ✅ '{sname}' connected — {registered} tool(s){extra}.")
@@ -384,10 +389,12 @@ class MCPManager:
         return name in self._tool_map
 
     async def call(self, name: str, args: dict) -> str:
-        """Invoke an MCP tool by its Gemini-side name; return text output."""
+        """Invoke an MCP tool by its Gemini-side name; return text output.
+        If the result contains an image/video URL, download it to generated/
+        and return a clean 'saved' message (no raw URL / task IDs to read aloud)."""
         if name not in self._tool_map:
             return f"Unknown MCP tool: {name}"
-        session, real = self._tool_map[name]
+        session, real, sname = self._tool_map[name]
         try:
             res = await session.call_tool(real, args or {})
         except Exception as e:
@@ -400,7 +407,48 @@ class MCPManager:
         out = "\n".join(parts) if parts else "(no output)"
         if getattr(res, "isError", False):
             out = "Error: " + out
+
+        # If a media URL came back, save it to disk and report the file instead.
+        saved = await self._maybe_save_media(out, sname)
+        if saved:
+            return saved
         return out[:6000]
+
+    async def _maybe_save_media(self, text: str, sname: str) -> str | None:
+        """Find an image/video URL in the result, download it to
+        generated/<server>/, and return a clean message. None if no media URL."""
+        media_url = None
+        for u in re.findall(r"https?://\S+", text or ""):
+            clean = u.rstrip(').,\'"]}')
+            path = clean.split("?")[0].lower()
+            if path.endswith(_MEDIA_EXT):
+                media_url = clean
+        if not media_url:
+            return None
+
+        d = self._save_dir(sname)
+        ext = Path(media_url.split("?")[0]).suffix or ".bin"
+        fname = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
+        dest = d / fname
+
+        def _dl():
+            req = urllib.request.Request(media_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=180) as r, open(dest, "wb") as f:
+                f.write(r.read())
+
+        try:
+            await asyncio.to_thread(_dl)
+            print(f"[MCP] Saved media: generated/{sname}/{fname}  ({media_url})")
+            return (f"Done — the result is ready and saved in the {sname} folder "
+                    f"as {fname}.")
+        except Exception as e:
+            print(f"[MCP] media download failed: {e}")
+            return None  # fall back to the raw text
+
+    def _save_dir(self, sname: str) -> Path:
+        d = _base_dir() / "generated" / re.sub(r"[^a-zA-Z0-9._-]", "_", sname)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
 
     async def close(self):
         if self._stack is not None:

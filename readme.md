@@ -112,7 +112,7 @@ Then by voice:
 - *"Generate an image of a quiet beach at sunrise"*
 - Drop an image onto JARVIS, then *"edit this to make it nighttime"* (uses the dropped image)
 
-Generation runs in the background (JARVIS stays responsive) and results are saved to `generated/`.
+Generation runs in the background (JARVIS stays responsive) and results are saved to `generated/higgsfield/`.
 
 > 🔒 **Never commit** `api_keys.json`, `google_credentials.json`, or any `*_token.json` — they're already in `.gitignore` to keep your secrets safe.
 
@@ -161,6 +161,8 @@ cp config/mcp_servers.example.json config/mcp_servers.json
   ```
 
 **4. Run JARVIS** — it connects to each enabled server on startup (look for `[MCP] ✅ ... connected`) and you can use those tools by voice.
+
+> 🖼️ **Media auto-save:** if a tool returns an image/video URL (e.g. kie.ai, Higgsfield-style generators), JARVIS downloads it to `generated/<server>/` and tells you the saved filename instead of reading the URL/task-ID aloud.
 
 > 🔒 `config/mcp_servers.json` is **gitignored** (it can hold API keys in `env`/`token`), so your servers and tokens stay private. If you don't configure any servers, MCP stays dormant and JARVIS runs normally.
 

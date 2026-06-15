@@ -33,7 +33,7 @@ def _base_dir() -> Path:
 
 
 def _save_dir() -> Path:
-    d = _base_dir() / "generated"
+    d = _base_dir() / "generated" / "higgsfield"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -82,16 +82,16 @@ def _run(prompt: str, model: str, images: list[str] | None = None, player=None) 
 
     # Try to download to a real file
     ext = Path(url.split("?")[0]).suffix or ".png"
-    fname = f"higgsfield_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
+    fname = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
     dest = _save_dir() / fname
     try:
         _download(url, dest)
         if player:
             try:
-                player.write_log(f"[Higgsfield] Saved: generated/{fname}  ({url})")
+                player.write_log(f"[Higgsfield] Saved: generated/higgsfield/{fname}  ({url})")
             except Exception:
                 pass
-        return f"Your {model} result is ready, sir — I saved it as {fname} in the generated folder."
+        return f"Your {model} result is ready, sir — saved in the higgsfield folder as {fname}."
     except Exception as e:
         print(f"[Higgsfield] download failed: {e}")
         return f"Your {model} result is ready, sir. The link is: {url}"
