@@ -780,7 +780,9 @@ class JarvisLive:
         self._loop          = None
         self._is_speaking   = False
         self._speaking_lock = threading.Lock()
+        self._suppress_output = False   # set by interrupt() until turn completes
         self.ui.on_text_command = self._on_text_command
+        self.ui.on_interrupt = self.interrupt
         self._turn_done_event: asyncio.Event | None = None
 
         # Clap-to-wake system
@@ -865,6 +867,35 @@ class JarvisLive:
         elif not value and was_speaking and not self.ui.muted:
             self.ui.set_state("LISTENING")
             self._clap_detector.set_armed(True)
+
+    def _flush_audio(self):
+        """Drop any buffered output audio so JARVIS stops talking immediately
+        (used on barge-in / interruption)."""
+        q = self.audio_in_queue
+        if q is not None:
+            try:
+                while True:
+                    q.get_nowait()
+            except Exception:
+                pass
+        self.set_speaking(False)
+        if self._turn_done_event:
+            self._turn_done_event.set()
+
+    def interrupt(self):
+        """Stop JARVIS mid-speech (the 'stop' hotkey). Thread-safe: schedules
+        the flush on the event loop. Drops buffered AND incoming output audio
+        until the current turn ends, so JARVIS goes quiet at once and listens."""
+        if self._loop:
+            self._loop.call_soon_threadsafe(self._do_interrupt)
+
+    def _do_interrupt(self):
+        self._suppress_output = True
+        self._flush_audio()
+        try:
+            self.ui.write_log("SYS: Stopped — listening.")
+        except Exception:
+            pass
 
     def speak(self, text: str):
         if not self._loop or not self.session:
@@ -972,7 +1003,7 @@ class JarvisLive:
                 speech_config=types.SpeechConfig(
                     voice_config=types.VoiceConfig(
                         prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name="Charon"
+                            voice_name="Puck"
                         )
                     )
                 ),
@@ -1283,6 +1314,9 @@ class JarvisLive:
         loop = asyncio.get_event_loop()
 
         def callback(indata, frames, time_info, status):
+            # Don't send mic while JARVIS is speaking — otherwise (on speakers)
+            # it hears its own voice and talks to itself. Interruption is handled
+            # by the "stop" hotkey instead (see JarvisLive.interrupt()).
             with self._speaking_lock:
                 jarvis_speaking = self._is_speaking
             if not jarvis_speaking and not self.ui.muted:
@@ -1316,12 +1350,20 @@ class JarvisLive:
                 async for response in self.session.receive():
 
                     if response.data:
-                        if self._turn_done_event and self._turn_done_event.is_set():
-                            self._turn_done_event.clear()
-                        self.audio_in_queue.put_nowait(response.data)
+                        if not self._suppress_output:
+                            if self._turn_done_event and self._turn_done_event.is_set():
+                                self._turn_done_event.clear()
+                            self.audio_in_queue.put_nowait(response.data)
+                        # else: interrupted — drop leftover audio for this turn
 
                     if response.server_content:
                         sc = response.server_content
+
+                        # Barge-in: user spoke over JARVIS. The server stops
+                        # generating, but locally-buffered audio would keep
+                        # playing — flush it so JARVIS stops talking at once.
+                        if getattr(sc, "interrupted", False):
+                            self._flush_audio()
 
                         if sc.output_transcription and sc.output_transcription.text:
                             txt = _clean_transcript(sc.output_transcription.text)
@@ -1337,6 +1379,7 @@ class JarvisLive:
                         if sc.turn_complete:
                             if self._turn_done_event:
                                 self._turn_done_event.set()
+                            self._suppress_output = False   # interruption ends with the turn
 
                             full_in = " ".join(in_buf).strip()
                             if full_in:
@@ -1425,6 +1468,7 @@ class JarvisLive:
 
         # Connect external MCP servers once (persists across reconnects).
         try:
+            self.ui.set_status("CONNECTING TOOLS…")
             await self.mcp.connect_all()
         except Exception as e:
             print(f"[MCP] connect_all failed: {e}")
@@ -1432,6 +1476,7 @@ class JarvisLive:
         while True:
             try:
                 print("[JARVIS] 🔌 Connecting...")
+                self.ui.set_status("CONNECTING…")
                 self.ui.set_state("THINKING")
                 config = self._build_config()
 
@@ -1446,6 +1491,7 @@ class JarvisLive:
                     self._turn_done_event = asyncio.Event()
 
                     print("[JARVIS] ✅ Connected.")
+                    self.ui.set_status("ONLINE")
                     self.ui.set_state("LISTENING")
                     self.ui.write_log("SYS: JARVIS online.")
                     self._clap_detector.start()
@@ -1468,6 +1514,7 @@ class JarvisLive:
                 traceback.print_exc()
             self._clap_detector.stop()
             self.set_speaking(False)
+            self.ui.set_status("RECONNECTING…")
             self.ui.set_state("THINKING")
             print("[JARVIS] 🔄 Reconnecting in 3s...")
             await asyncio.sleep(3)

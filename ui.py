@@ -1181,6 +1181,7 @@ class MainWindow(QMainWindow):
     _log_sig        = pyqtSignal(str)
     _state_sig      = pyqtSignal(str)
     _wake_focus_sig = pyqtSignal()
+    _status_sig     = pyqtSignal(str)
 
     def __init__(self, face_path: str):
         super().__init__()
@@ -1198,6 +1199,7 @@ class MainWindow(QMainWindow):
         self._hwnd = None
 
         self.on_text_command  = None
+        self.on_interrupt     = None   # "stop" hotkey -> JarvisLive.interrupt
         self._muted           = False
         self._current_file: str | None = None
 
@@ -1248,6 +1250,7 @@ class MainWindow(QMainWindow):
         self._log_sig.connect(self._log.append_log)
         self._state_sig.connect(self._apply_state)
         self._wake_focus_sig.connect(self._on_wake_focus, Qt.ConnectionType.QueuedConnection)
+        self._status_sig.connect(self._apply_status)
 
         self._overlay: SetupOverlay | None = None
         self._ready = self._check_config()
@@ -1258,6 +1261,15 @@ class MainWindow(QMainWindow):
         sc_mute.activated.connect(self._toggle_mute)
         sc_full = QShortcut(QKeySequence("F11"), self)
         sc_full.activated.connect(self._toggle_fullscreen)
+        sc_stop = QShortcut(QKeySequence("Esc"), self)
+        sc_stop.activated.connect(self._do_interrupt)
+
+    def _do_interrupt(self):
+        if self.on_interrupt:
+            try:
+                self.on_interrupt()
+            except Exception:
+                pass
 
     def _toggle_fullscreen(self):
         if self.isFullScreen():
@@ -1473,6 +1485,11 @@ class MainWindow(QMainWindow):
             return l
 
         lay.addWidget(_badge("MARK XXXIX", C.PRI_DIM))
+        self._status_lbl = QLabel("● CONNECTING…")
+        self._status_lbl.setFont(QFont(UI_FONT, 10, QFont.Weight.Bold))
+        self._status_lbl.setStyleSheet(f"color: {C.ACC2}; background: transparent;")
+        lay.addSpacing(14)
+        lay.addWidget(self._status_lbl)
         lay.addStretch()
 
         mid = QVBoxLayout(); mid.setSpacing(1)
@@ -1749,6 +1766,18 @@ class MainWindow(QMainWindow):
     def _apply_state(self, state: str):
         self.hud.set_orb_state(state)
 
+    def _apply_status(self, status: str):
+        """Update the header connection badge: ONLINE / CONNECTING / OFFLINE."""
+        s = (status or "").strip().upper()
+        if s.startswith("ONLINE"):
+            color, text = C.GREEN, "● ONLINE"
+        elif s.startswith("OFFLINE"):
+            color, text = C.RED, "● OFFLINE"
+        else:
+            color, text = C.ACC2, f"● {status}"
+        self._status_lbl.setText(text)
+        self._status_lbl.setStyleSheet(f"color: {color}; background: transparent;")
+
     def _check_config(self) -> bool:
         if not API_FILE.exists(): return False
         try:
@@ -1832,8 +1861,20 @@ class JarvisUI:
     def on_text_command(self, cb):
         self._win.on_text_command = cb
 
+    @property
+    def on_interrupt(self):
+        return self._win.on_interrupt
+
+    @on_interrupt.setter
+    def on_interrupt(self, cb):
+        self._win.on_interrupt = cb
+
     def set_state(self, state: str):
         self._win._state_sig.emit(state)
+
+    def set_status(self, status: str):
+        """Update the header connection badge (e.g. 'CONNECTING…', 'ONLINE')."""
+        self._win._status_sig.emit(status)
 
     def set_audio_level(self, level: float):
         """Feed the live output-audio amplitude (0..1) to the HUD for true

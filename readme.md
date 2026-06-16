@@ -51,6 +51,18 @@ python main.py
 
 > ⚠️ **Installation Note:** To keep the repository lightweight, some OS-specific dependencies are not bundled in `requirements.txt`. If you run into a `ModuleNotFoundError`, simply install the missing package via `pip install <module_name>` for your specific system.
 
+### Controls
+
+| Key | Action |
+|-----|--------|
+| **Esc** | Stop JARVIS mid-speech (interrupt) and return to listening |
+| **F4** | Mute / unmute the microphone |
+| **F11** | Toggle fullscreen |
+
+The header shows a live connection badge: **CONNECTING… → ONLINE** (green) so you always know its status.
+
+> 🎙️ **Voice:** set by `voice_name` in `main.py` (and `actions/screen_processor.py`). Pick any Gemini Live voice — preview them in [Google AI Studio](https://aistudio.google.com) (Stream mode). On speakers, use **Esc** to interrupt; for true "just say stop" voice barge-in, use headphones (avoids the mic hearing JARVIS's own voice).
+
 ---
 
 ## 🔑 Configuration

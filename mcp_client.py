@@ -326,7 +326,9 @@ class MCPManager:
             if spec.get("disabled"):
                 continue
             # A single server must never hang JARVIS startup — bound each connect.
-            timeout = 180.0 if str(spec.get("auth", "")).lower() == "oauth" else 45.0
+            # OAuth needs time for the browser login; token/local connects should
+            # be quick, so fail fast if a server is slow/down (keeps startup snappy).
+            timeout = 180.0 if str(spec.get("auth", "")).lower() == "oauth" else 20.0
             try:
                 await asyncio.wait_for(
                     self._connect_one(sname, spec, ClientSession), timeout=timeout)
