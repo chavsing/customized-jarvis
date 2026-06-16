@@ -3,6 +3,7 @@ import re
 import threading
 import json
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -781,6 +782,7 @@ class JarvisLive:
         self._is_speaking   = False
         self._speaking_lock = threading.Lock()
         self._suppress_output = False   # set by interrupt() until turn completes
+        self._suppress_until  = 0.0     # safety deadline so it never sticks
         self.ui.on_text_command = self._on_text_command
         self.ui.on_interrupt = self.interrupt
         self._turn_done_event: asyncio.Event | None = None
@@ -891,6 +893,7 @@ class JarvisLive:
 
     def _do_interrupt(self):
         self._suppress_output = True
+        self._suppress_until = time.monotonic() + 2.0   # auto-clear backstop
         self._flush_audio()
         try:
             self.ui.write_log("SYS: Stopped — listening.")
@@ -1350,6 +1353,10 @@ class JarvisLive:
                 async for response in self.session.receive():
 
                     if response.data:
+                        # Auto-clear suppression after its deadline so it can
+                        # never stick and silence JARVIS permanently.
+                        if self._suppress_output and time.monotonic() > self._suppress_until:
+                            self._suppress_output = False
                         if not self._suppress_output:
                             if self._turn_done_event and self._turn_done_event.is_set():
                                 self._turn_done_event.clear()
@@ -1373,6 +1380,9 @@ class JarvisLive:
                         if sc.input_transcription and sc.input_transcription.text:
                             txt = _clean_transcript(sc.input_transcription.text)
                             if txt:
+                                # User started a new turn — clear any leftover
+                                # interruption suppression so the reply plays.
+                                self._suppress_output = False
                                 in_buf.append(txt)
                                 self._wake_monitor.on_transcript(txt)
 
